@@ -1493,7 +1493,8 @@
     "schedule": "Schedule",
     "sessions": "Sessions",
     "settings": "Settings",
-    "task_runner": "Task Runner"
+    "task_runner": "Task Runner",
+    "webhooks": "Webhooks"
   },
   "pages": {
     "capabilitiesPage": {
