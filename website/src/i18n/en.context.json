@@ -11,10 +11,6 @@
     "apps.autoResearch.researchLabPage.60s": "A preset duration of 60 seconds. The number is data; only the unit letter is translatable, and most locales keep `s`.",
     "apps.autoResearch.researchLabPage.add": "Verb on the button that adds the typed sub-question to the research list beside it. If the target language needs an object, name the sub-question. Distinct from the \"Add\" on the Code Review Sage page, which adds a review pattern.",
     "apps.autoResearch.researchLabPage.min": "The unit \"min\" = minutes, rendered after a number. An abbreviation, not the word \"minimum\".",
-    "apps.codeReviewSage.codeReviewSagePage.add": "Verb on a button: add an entry to the list beside it. If the target language needs an object, name the thing being added.",
-    "apps.codeReviewSage.codeReviewSagePage.gh": "The literal name of the GitHub CLI executable, `gh`. Do not translate: the user types it.",
-    "apps.codeReviewSage.codeReviewSagePage.new": "Badge on a freshly-created item, meaning recently added. An adjective here, not the \"create\" button.",
-    "apps.codeReviewSage.codeReviewSagePage.run": "Verb on a button: execute this job/workflow now. NOT the noun (\"a run\"), which several locales translate differently.",
     "apps.crewCompanion.reminders.add_button": "Button that saves the reminder typed in the box beside it. The verb \"add\", not the arithmetic sense.",
     "apps.crewCompanion.settings.custom_placeholder": "Placeholder in a small number field for a custom break interval. Short for \"minutes\" (the unit), not \"minimum\".",
     "apps.crewCompanion.time.now": "Relative time label on a reminder that is due at this moment, shown where others read \"20 min from now\".",
@@ -148,6 +144,11 @@
     "pages.telemetryPanel.p90_col": "Column header on the latency tables: the slow tail, i.e. nine in ten measured samples finished at or below this duration. This is the figure a reader checks when something feels slow.",
     "pages.sessionMemoryCard.cpu": "Column header on the Session & Task Memory table: cores of CPU used by that session, shown as a decimal like 0.31. \"CPU\" as the processor, not a percentage of one machine. Width-constrained: keep it as short as the target language allows.",
     "pages.sessionMemoryCard.mcp": "Column header on the Session & Task Memory table counting how many MCP (Model Context Protocol) server processes that session is carrying. Product/protocol terminology — keep the acronym; it is not the English word \"map\".",
-    "pages.sessionMemoryCard.pid": "\"PID\" = operating-system process id, a column header over a column of numeric process identifiers the user can paste into ps or kill. A term of art; keep the acronym practitioners in the target language use."
+    "pages.sessionMemoryCard.pid": "\"PID\" = operating-system process id, a column header over a column of numeric process identifiers the user can paste into ps or kill. A term of art; keep the acronym practitioners in the target language use.",
+    "apps.codeReviewSage.components.addReposModal.add": "Button on the add-repositories dialog. Verb: adds the listed repository to the app's pinned set.",
+    "apps.codeReviewSage.components.bandChips.all": "Filter chip above the report's findings list. Means 'no band filter — show every change', not 'all' as a quantity.",
+    "apps.codeReviewSage.components.prPickList.all": "Filter chip above the pull-request list. Means 'show every pull request, reviewed ones included'.",
+    "apps.codeReviewSage.components.prPickList.new": "Badge on a pull-request row meaning it has not been reviewed yet. Adjective, lowercase, shown next to the title.",
+    "apps.codeReviewSage.components.leftRail.version": "Version chip in the app rail's identity row, e.g. \"v2.0\". `{{version}}` is the number — keep the prefix short, and drop it entirely if your locale does not prefix version numbers."
   }
 }
