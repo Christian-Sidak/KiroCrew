@@ -20,6 +20,102 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # ── Path-based change detection ────────────────────────────────────────
+  # Gates expensive test/lint jobs so they only run when relevant files change.
+  # Meta changes (.github/**, scripts/**) always trigger everything -- a CI
+  # config or helper script change can break any job.
+  #
+  # Design: conservative first pass (issue #1556). Only clearly single-surface
+  # jobs are gated; cross-cutting jobs (scrub-lint, brand-lint, docs-lint,
+  # cfn-lint, Gateway Tests macOS, Coverage Gate) remain always-on.
+  #
+  # On pushes to main (merge commits), dorny/paths-filter compares HEAD~1..HEAD
+  # so all filters correctly evaluate to true for merge commits that touch those
+  # paths. This means main never skips jobs it shouldn't.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # dorny/paths-filter fetches the PR's changed-file list from the GitHub REST
+    # API on pull_request events, which needs pull-requests:read. The workflow's
+    # top-level grant is contents:read only, and job-level permissions REPLACE
+    # (not extend) it, so both are restated here: contents:read for the checkout
+    # + git-based detection on push, pull-requests:read for the PR API call.
+    # Without this the job 403s, every gated job skips, and Coverage Gate fails
+    # closed -- blocking every PR.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      # Single decision per surface, computed ONCE here (issue #1556) and
+      # consumed everywhere else -- gated jobs and the Coverage Gate read
+      # ONLY run_backend / run_frontend; no other job re-derives path policy.
+      run_backend: ${{ steps.decide.outputs.run_backend }}
+      run_frontend: ${{ steps.decide.outputs.run_frontend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            backend:
+              # The backend pytest suite (setup.cfg `testpaths`: test, transfer,
+              # src/kiro_crew/apps/builtins) asserts on far more than src/ + test/:
+              # install/build inputs, container/packaging scripts, root JSON
+              # fixtures, AND ~40 cross-surface guards under test/ that read
+              # website/ (e.g. credential-redaction parity in
+              # test_redaction_mirror_parity.py, dashboard security headers).
+              # So a change to any of these must run the backend suite, or the
+              # only job that exercises it is silently skipped. website/** is
+              # therefore included here (a frontend change runs backend guards
+              # too); a follow-up will split those guards into a dedicated
+              # always-on job so frontend-only PRs can skip the full backend
+              # suite again without losing the guards.
+              - 'src/**'
+              - 'test/**'
+              - 'transfer/**'
+              - 'website/**'
+              - 'pyproject.toml'
+              - 'setup.cfg'
+              - 'setup.py'
+              - 'conftest.py'
+              - 'Makefile'
+              - 'docker/**'
+              - 'packaging/**'
+              - 'cli.sh'
+              - 'install.sh'
+              - 'config-baseline.json'
+              - 'error-code-baseline.json'
+            frontend:
+              - 'website/**'
+            meta:
+              - '.github/**'
+              - 'scripts/**'
+
+      - name: Decide which surfaces run
+        id: decide
+        env:
+          BACKEND: ${{ steps.filter.outputs.backend }}
+          FRONTEND: ${{ steps.filter.outputs.frontend }}
+          META: ${{ steps.filter.outputs.meta }}
+          # Escape hatch: the ci-full-run label forces the complete matrix
+          # regardless of paths. NOTE: this workflow does not listen for the
+          # `labeled` event (adding it would re-run the full matrix on every
+          # bot label), so the label takes effect on the NEXT push to the PR or
+          # a manual "Re-run all jobs" -- not at the instant it is applied.
+          FULL_RUN: ${{ contains(github.event.pull_request.labels.*.name, 'ci-full-run') }}
+        run: |
+          # Policy (in ONE place): a surface runs when its own paths changed,
+          # when meta paths changed (.github/**, scripts/** -- when in doubt,
+          # run everything), or when a full run is forced.
+          run_backend=false; run_frontend=false
+          if [ "$BACKEND" = "true" ] || [ "$META" = "true" ] || [ "$FULL_RUN" = "true" ]; then run_backend=true; fi
+          if [ "$FRONTEND" = "true" ] || [ "$META" = "true" ] || [ "$FULL_RUN" = "true" ]; then run_frontend=true; fi
+          echo "run_backend=$run_backend"   >> "$GITHUB_OUTPUT"
+          echo "run_frontend=$run_frontend" >> "$GITHUB_OUTPUT"
+          echo "backend=$BACKEND frontend=$FRONTEND meta=$META full_run=$FULL_RUN -> run_backend=$run_backend run_frontend=$run_frontend"
+
   scrub-lint:
     name: De-Amazon Scrub Lint
     runs-on: ubuntu-latest
@@ -88,6 +184,8 @@ jobs:
 
   backend-lint:
     name: Backend Lint & Type Check
+    needs: [changes]
+    if: needs.changes.outputs.run_backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -135,6 +233,8 @@ jobs:
 
   backend-test:
     name: Backend Tests
+    needs: [changes]
+    if: needs.changes.outputs.run_backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -242,6 +342,8 @@ jobs:
   # run the same tests measurably slower.
   backend-test-windows:
     name: Backend Tests (Windows)
+    needs: [changes]
+    if: needs.changes.outputs.run_backend == 'true'
     runs-on: windows-latest
     # windows-latest runs the same shards measurably slower than POSIX.
     timeout-minutes: 40
@@ -364,6 +466,8 @@ jobs:
   #
   backend-test-sandbox:
     name: Backend Tests (namespace sandbox)
+    needs: [changes]
+    if: needs.changes.outputs.run_backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -400,7 +504,10 @@ jobs:
 
   coverage-combine:
     name: Coverage Combine
-    needs: backend-test
+    needs: [backend-test, changes]
+    # Run only if backend-test ran (produced artifacts) -- skip gracefully when
+    # backend-test was path-skipped (no coverage artifacts to combine).
+    if: needs.changes.outputs.run_backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -459,11 +566,18 @@ jobs:
   # deterministic same-run handoff instead of a cross-workflow artifact race.
   # The check name "Coverage Gate" is unchanged, so branch protection that
   # requires it is still satisfied.
+  #
+  # Path-gating interaction: when backend-only or frontend-only files change,
+  # the opposite surface's test job is path-skipped. The gate must treat that
+  # as acceptable (not fail-closed on a missing artifact from a job that
+  # correctly didn't run). The first step checks upstream results AND the
+  # path-filter outputs to distinguish "skipped because path-gated" (OK) from
+  # "skipped because dependency failed" (fail-closed).
   coverage-gate:
     name: Coverage Gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [coverage-combine, frontend-test]
+    needs: [coverage-combine, frontend-test, changes]
     # Always run so the required check emits a real verdict. Without
     # `if: always()`, a failing OR skipped dependency would SKIP this job, and
     # GitHub treats a skipped required check as SATISFIED -- silently defeating
@@ -472,30 +586,47 @@ jobs:
     # non-success upstream result into an explicit failure.
     if: ${{ always() }}
     steps:
-      - name: Require upstream coverage jobs to have succeeded
+      - name: Require upstream coverage jobs to have succeeded (or be legitimately path-skipped)
         env:
           CC: ${{ needs.coverage-combine.result }}
           FE: ${{ needs.frontend-test.result }}
+          RUN_BACKEND: ${{ needs.changes.outputs.run_backend }}
+          RUN_FRONTEND: ${{ needs.changes.outputs.run_frontend }}
         run: |
-          echo "coverage-combine=$CC  frontend-test=$FE"
-          if [ "$CC" != "success" ] || [ "$FE" != "success" ]; then
-            echo "::error::Upstream coverage jobs did not succeed (coverage-combine=$CC, frontend-test=$FE) -- failing closed."
+          echo "coverage-combine=$CC frontend-test=$FE run_backend=$RUN_BACKEND run_frontend=$RUN_FRONTEND"
+          # Empty flags mean the path-filter job never reported (it failed or
+          # was cancelled) -- its skips can't be trusted, fail closed.
+          if [ -z "$RUN_BACKEND" ] || [ -z "$RUN_FRONTEND" ]; then
+            echo "::error::path-filter (changes) never reported -- failing closed."
             exit 1
           fi
+          # Invariant per surface: required => upstream succeeded;
+          # not required => upstream was (only) path-skipped. Anything else
+          # (failure, cancellation, dependency-caused skip, or a job that ran
+          # when it shouldn't have) fails closed.
+          fail=0
+          if [ "$RUN_BACKEND" = "true" ]  && [ "$CC" != "success" ]; then echo "::error::coverage-combine=$CC but backend was required"; fail=1; fi
+          if [ "$RUN_BACKEND" != "true" ] && [ "$CC" != "skipped" ]; then echo "::error::coverage-combine=$CC but backend was path-skipped -- inconsistent"; fail=1; fi
+          if [ "$RUN_FRONTEND" = "true" ]  && [ "$FE" != "success" ]; then echo "::error::frontend-test=$FE but frontend was required"; fail=1; fi
+          if [ "$RUN_FRONTEND" != "true" ] && [ "$FE" != "skipped" ]; then echo "::error::frontend-test=$FE but frontend was path-skipped -- inconsistent"; fail=1; fi
+          [ "$fail" = "0" ] || exit 1
 
       - name: Download backend coverage
+        if: needs.coverage-combine.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: coverage-backend
           path: backend-cov
 
       - name: Download frontend coverage
+        if: needs.frontend-test.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: coverage-frontend
           path: frontend-cov
 
       - name: Check backend coverage (min 70%)
+        if: needs.coverage-combine.result == 'success'
         run: |
           F=backend-cov/coverage.xml
           test -f "$F" || { echo "::error::coverage.xml missing from coverage-backend artifact"; exit 1; }
@@ -512,6 +643,7 @@ jobs:
           PY
 
       - name: Check frontend coverage (min 60%)
+        if: needs.frontend-test.result == 'success'
         run: |
           F=$(find frontend-cov -name 'cobertura*.xml' 2>/dev/null | head -1)
           test -n "$F" || { echo "::error::cobertura report missing from coverage-frontend artifact"; exit 1; }
@@ -535,15 +667,21 @@ jobs:
           if [ -f "$BF" ]; then
             B=$(python3 -c "import xml.etree.ElementTree as ET; print(f\"{float(ET.parse('$BF').getroot().attrib['line-rate'])*100:.2f}\")")
             echo "| Backend | ${B}% | 70% |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Backend | _(skipped — no backend changes)_ | 70% |" >> "$GITHUB_STEP_SUMMARY"
           fi
           FF=$(find frontend-cov -name 'cobertura*.xml' 2>/dev/null | head -1)
           if [ -n "$FF" ]; then
             FR=$(python3 -c "import xml.etree.ElementTree as ET; print(f\"{float(ET.parse('$FF').getroot().attrib['line-rate'])*100:.2f}\")")
             echo "| Frontend | ${FR}% | 60% |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Frontend | _(skipped — no frontend changes)_ | 60% |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
   frontend-lint:
     name: Frontend Lint & Type Check
+    needs: [changes]
+    if: needs.changes.outputs.run_frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -688,6 +826,8 @@ jobs:
   # pure unit tests, no Electron binary download, no packaging.
   electron-test:
     name: Electron Shell Tests
+    needs: [changes]
+    if: needs.changes.outputs.run_frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -717,6 +857,8 @@ jobs:
 
   frontend-test:
     name: Frontend Tests
+    needs: [changes]
+    if: needs.changes.outputs.run_frontend == 'true'
     runs-on: ubuntu-latest
     # vitest + coverage is the longest ubuntu job (~23 min observed max).
     timeout-minutes: 50
@@ -768,6 +910,15 @@ jobs:
 
   e2e:
     name: E2E (stub ACP backend, offline)
+    needs: [changes]
+    # Runs on EITHER surface: despite the "offline stub ACP" name this gate is
+    # not frontend-only. `setup.py test_e2e` drives test/test_e2e_smoke.py +
+    # test/test_playwright_e2e.py (both skipif-gated on KIROCREW_E2E=1, so the
+    # unit backend-test job never runs them) and sets
+    # KIROCREW_STRICT_ON_LOOP_PERSIST=1 -- a backend transcript-persistence
+    # invariant. Gating on run_frontend alone let a backend/src or test/** change
+    # skip the only job that exercises it. run_backend covers setup.py + test/**.
+    if: needs.changes.outputs.run_backend == 'true' || needs.changes.outputs.run_frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
