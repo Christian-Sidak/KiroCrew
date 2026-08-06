@@ -479,6 +479,11 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         "dashboard/chat_persistence.py",
         "dashboard/chat_regenerate.py",
         "dashboard/chat_rewind.py",
+        # Ingress scrub on a session copied in from a peer instance: the redacted
+        # text is written to the slot (memory + disk), and the surfaces that show
+        # it to a human are the already-registered sinks. Same category as
+        # chat_fork.py, which redacts the same copied content locally.
+        "dashboard/session_transfer.py",
         "dashboard/chat_title.py",
         "dashboard/chat_utils.py",
         "dashboard/chat_voice.py",

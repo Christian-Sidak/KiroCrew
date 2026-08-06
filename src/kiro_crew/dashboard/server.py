@@ -40,6 +40,7 @@ from kiro_crew.dashboard import (
     handlers_instances,
     handlers_project,
     openai_compat,
+    session_transfer,
     stt_stream,
     ws,
 )
@@ -2157,6 +2158,10 @@ async def start_dashboard(
     app.router.add_post("/api/chat/slots", chat.api_chat_slot_create)
     app.router.add_post("/api/chat/slots/cleanup", chat.api_chat_slots_cleanup)
     app.router.add_post("/api/chat/slots/model", chat.api_chat_slots_model)
+    # Static segment BEFORE the {slot} routes below, matching the cleanup/model
+    # precedent: aiohttp resolves in registration order, so a later
+    # ``/api/chat/slots/{slot}`` POST would otherwise shadow this path.
+    app.router.add_post("/api/chat/slots/import", session_transfer.api_chat_slot_import)
     app.router.add_get("/api/chat/slots/{slot}", chat.api_chat_slot_detail)
     app.router.add_post("/api/chat/slots/{slot}/stop", chat.api_chat_slot_stop)
     app.router.add_post("/api/chat/slots/{slot}/interrupt", chat.api_chat_slot_interrupt)
@@ -2411,6 +2416,9 @@ async def start_dashboard(
         "/api/instances/{id}/disconnect", handlers_instances.api_instances_disconnect
     )
     app.router.add_post("/api/instances/{id}/restart", handlers_instances.api_instances_restart)
+    app.router.add_post(
+        "/api/instances/{id}/send-session", handlers_instances.api_instances_send_session
+    )
 
     # Misc (notifications GET/clear and send-message via _register_mcp_routes)
     app.router.add_get("/api/notifications", handlers.api_notifications)
