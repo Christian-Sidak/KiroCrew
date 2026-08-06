@@ -2947,7 +2947,8 @@ class GatewayOrchestrator:
                 safe_nudge, _ = redact_credentials(safe_nudge)
                 safe_response, _ = redact_exfiltration_urls(response or "")
                 safe_response, _ = redact_credentials(safe_response)
-                save_conversation_turn(
+                await asyncio.to_thread(
+                    save_conversation_turn,
                     self.conv_log,
                     key,
                     safe_nudge,
@@ -4317,7 +4318,8 @@ class GatewayOrchestrator:
                                 safe_announce, _ = redact_credentials(safe_announce)
                                 safe_response, _ = redact_exfiltration_urls(response or "")
                                 safe_response, _ = redact_credentials(safe_response)
-                                save_conversation_turn(
+                                await asyncio.to_thread(
+                                    save_conversation_turn,
                                     self.conv_log,
                                     parent_key,
                                     safe_announce,

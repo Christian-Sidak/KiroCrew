@@ -708,6 +708,49 @@ def _redact_at_write_boundary(role: str, content: str) -> str:
     return content
 
 
+def latest_transcript_ts(*candidates: str | None) -> str | None:
+    """The latest of several candidate predecessor timestamps, or ``None``.
+
+    A writer can have more than one row to order itself against, and the two
+    writers of a session transcript learn about predecessors differently:
+    :meth:`ConversationLog.append` reads the authoritative file tail under the
+    cross-process flock, while the dashboard's ``_ChatSlot.append`` runs on the
+    event loop and may only consult in-process state (a ``stat`` plus a file read
+    per append is what ``AUTOSDE.yaml``'s ``no-blocking-call-on-event-loop`` rule
+    forbids). The slot therefore floors on the later of its in-memory window tail
+    and the last on-disk tail it was told about at the previous save.
+
+    Comparison goes through :func:`transcript_sort_key`, never string ordering:
+    rows carry two stored formats (aware and naive isoformat), so ``"a" > "b"``
+    on the raw strings compares different domains and can pick the earlier row.
+
+    An UNPARSEABLE candidate is skipped rather than ranked. ``transcript_sort_key``
+    deliberately buckets a value it cannot parse *after* every real instant, so
+    that a corrupt line displays at the end of a transcript rather than in the
+    middle of the conversation. That is right for sorting and wrong for a floor:
+    ranked, one malformed ``ts`` would win here, and
+    :func:`monotonic_transcript_ts` ignores a previous value it cannot parse — so
+    a single corrupt row on disk would silently switch the whole ordering
+    guarantee off and let the next row tie its predecessor again.
+
+    ``None`` and empty candidates are ignored too, so a caller can pass a value it
+    does not have yet without branching. Returns ``None`` when nothing usable was
+    supplied — which correctly means "no floor", not "floor of zero".
+    """
+    best: str | None = None
+    best_key: tuple[int, float] | None = None
+    for candidate in candidates:
+        if not candidate:
+            continue
+        key = transcript_sort_key(candidate)
+        if key[0] != 0:
+            # Unparseable: see the docstring. Not a usable floor.
+            continue
+        if best_key is None or key > best_key:
+            best, best_key = candidate, key
+    return best
+
+
 #: Default upper bound on the number of distinct session keys held in the
 #: in-memory transcript / metadata caches.  The previous implementation used
 #: plain ``dict`` caches that grew one entry per session key touched and never

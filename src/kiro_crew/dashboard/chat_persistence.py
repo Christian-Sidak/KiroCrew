@@ -29,6 +29,7 @@ from kiro_crew.effort import EFFORT_LEVELS, EFFORT_VALUES
 from kiro_crew.history import (
     _archive_lines,
     carry_provenance,
+    latest_transcript_ts,
     transcript_sort_key,
     update_metadata_off_loop,
 )
@@ -1515,6 +1516,29 @@ def _save_slot_to_history(
                     )
             payload = meta_str + frozen_prefix + "".join(
                 _interleave_foreign_lines(window_entries, window_lines, foreign_lines)
+            )
+
+            # Refresh the slot's ordering floor from what is actually going to
+            # disk, foreign rows included. This is the only place the slot can
+            # learn about a row it never observed: the lock is already held and
+            # the foreign lines are already parsed here, so it is free, whereas
+            # reading the tail per append would put file I/O on the event loop.
+            # It does not make the slot fully symmetric with
+            # ConversationLog.append -- a foreign row arriving BETWEEN two saves
+            # stays invisible until the next one -- but it closes the reachable
+            # shape, where a subagent/cron append is observed at the next flush.
+            _foreign_tail: str | None = None
+            for _line in foreign_lines:
+                try:
+                    _row_ts = json.loads(_line).get("ts")
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+                if isinstance(_row_ts, str):
+                    _foreign_tail = latest_transcript_ts(_foreign_tail, _row_ts)
+            slot._disk_tail_ts = latest_transcript_ts(
+                slot._disk_tail_ts,
+                _foreign_tail,
+                window_entries[-1].get("ts") if window_entries else None,
             )
 
             # Rewrite paths (rewind/regenerate/fork) intentionally TRUNCATE the

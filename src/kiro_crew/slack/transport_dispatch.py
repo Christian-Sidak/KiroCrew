@@ -230,7 +230,8 @@ async def handle_message_transport(
         if hook_result.action == HOOK_REPLY:
             await slack.post_message(channel, hook_result.text, reply_ts)
             if conversation_log and not _is_slack_restricted(session_key):
-                save_conversation_turn(
+                await asyncio.to_thread(
+                    save_conversation_turn,
                     conversation_log,
                     session_key,
                     text,

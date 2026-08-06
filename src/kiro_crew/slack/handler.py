@@ -2402,7 +2402,15 @@ async def maybe_handle_keyword_command(
         if spawn_reply:
             await slack.post_message(channel, spawn_reply, reply_ts)
             if conversation_log and not _is_slack_restricted(session_key):
-                save_conversation_turn(
+                # Offloaded: save_conversation_turn makes TWO ConversationLog
+                # appends, ~12ms of event-loop time on a 1.6MB transcript,
+                # dominated by the flock acquire and the write path. It also
+                # takes the PATIENT lock path off the loop -- on the loop
+                # ``_locked`` makes a single non-blocking acquire and raises
+                # HistoryLockTimeout under contention, so the durable copy was
+                # droppable exactly when another writer was active.
+                await asyncio.to_thread(
+                    save_conversation_turn,
                     conversation_log,
                     session_key,
                     text,
@@ -2419,7 +2427,8 @@ async def maybe_handle_keyword_command(
         if run_reply:
             await slack.post_message(channel, run_reply, reply_ts)
             if conversation_log and not _is_slack_restricted(session_key):
-                save_conversation_turn(
+                await asyncio.to_thread(
+                    save_conversation_turn,
                     conversation_log,
                     session_key,
                     text,
@@ -2436,7 +2445,8 @@ async def maybe_handle_keyword_command(
         if cron_reply:
             await slack.post_message(channel, cron_reply, reply_ts)
             if conversation_log and not _is_slack_restricted(session_key):
-                save_conversation_turn(
+                await asyncio.to_thread(
+                    save_conversation_turn,
                     conversation_log,
                     session_key,
                     text,
@@ -2616,7 +2626,8 @@ async def handle_message(
         if hook_result.action == HOOK_REPLY:
             await slack.post_message(channel, hook_result.text, reply_ts)
             if conversation_log and not _is_slack_restricted(session_key):
-                save_conversation_turn(
+                await asyncio.to_thread(
+                    save_conversation_turn,
                     conversation_log,
                     session_key,
                     text,
@@ -3599,7 +3610,8 @@ async def handle_message(
             except Exception:
                 logger.debug("Failed to delete thinking placeholder", exc_info=True)
         if conversation_log and not _is_slack_restricted(session_key):
-            save_conversation_turn(
+            await asyncio.to_thread(
+                save_conversation_turn,
                 conversation_log,
                 session_key,
                 text,
@@ -3700,7 +3712,8 @@ async def handle_message(
         logger.info("Review mode: ephemeral draft sent to %s in %s", user_id, channel)
         # Persist conversation (draft counts as a turn)
         if conversation_log and not _is_slack_restricted(session_key):
-            save_conversation_turn(
+            await asyncio.to_thread(
+                save_conversation_turn,
                 conversation_log,
                 session_key,
                 text,
@@ -3857,7 +3870,10 @@ async def handle_message(
     # ── Persist conversation history ──
     _skip_writes = _is_slack_restricted(session_key)
     if conversation_log and not _skip_writes:
-        save_conversation_turn(
+        # The per-turn hot path: two appends every turn, so this is where the
+        # ~12ms of loop time was paid most often.
+        await asyncio.to_thread(
+            save_conversation_turn,
             conversation_log,
             session_key,
             text,
