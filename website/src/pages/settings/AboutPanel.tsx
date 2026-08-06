@@ -644,7 +644,7 @@ export function AboutPanel() {
                 </p>
                 <div>
                   <Btn primary onClick={() => { if (!gwChanges) gwCheck.mutate(); setApplyError(''); setRestarting(false); setShowConfirm(true) }}>
-                    <ArrowUp size={13} className="lucide-inline" /> {i18nT('pages.settings.aboutPanel.update')}{gwTarget ? ` to v${gwTarget}` : ' now'}
+                    <ArrowUp size={13} className="lucide-inline" /> {gwTarget ? i18nT('pages.settings.aboutPanel.update_to_version', { version: gwTarget }) : i18nT('pages.settings.aboutPanel.update_now')}
                   </Btn>
                 </div>
               </>
@@ -711,7 +711,7 @@ export function AboutPanel() {
              onClick={() => { if (!gwApply.isPending && !restarting) setShowConfirm(false) }}>
           <div role="document" className="bg-card border border-border rounded-xl p-6 max-w-md w-full mx-4 shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-3">
-              <div className="text-sm font-bold text-text-strong flex items-center gap-1.5"><Package size={15} className="lucide-inline" /> {i18nT('pages.settings.aboutPanel.update')}{gwTarget ? ` to v${gwTarget}` : ''}</div>
+              <div className="text-sm font-bold text-text-strong flex items-center gap-1.5"><Package size={15} className="lucide-inline" /> {gwTarget ? i18nT('pages.settings.aboutPanel.update_to_version', { version: gwTarget }) : i18nT('pages.settings.aboutPanel.update')}</div>
               <button aria-label={i18nT('pages.settings.aboutPanel.close')} className="text-muted hover:text-text cursor-pointer bg-transparent border-none disabled:opacity-40 disabled:cursor-default" disabled={gwApply.isPending || restarting} onClick={() => { if (!gwApply.isPending && !restarting) setShowConfirm(false) }}><X size={15} /></button>
             </div>
             {gwCheck.isPending ? (
