@@ -111,6 +111,30 @@ def is_direct_local_request(request: web.Request) -> bool:
     return not any(h in request.headers for h in _PROXY_FORWARD_HEADERS)
 
 
+def is_proxied_loopback_request(request: web.Request) -> bool:
+    """Return ``True`` when this request reached us through a SAME-HOST proxy.
+
+    Narrower than ``not is_direct_local_request()``, and the difference is the
+    whole point. That negation is true for two very different situations:
+
+    * a **non-loopback** peer (the gateway's bind was widened, e.g.
+      ``KIROCREW_BIND``) — ``request.remote`` is then the client's own address,
+      so anything keyed on it is per-client and behaves as intended; and
+    * a **loopback** peer that carries forwarding headers — a tunnel or reverse
+      proxy running on this host (cloudflared, ngrok, ``tailscale serve``,
+      nginx). Here ``request.remote`` is the *proxy*, identical for every client
+      arriving through it.
+
+    Only the second case makes a per-address binding collapse onto one value, so
+    only the second case is reported here. Callers that need "is this the local
+    machine" still want :func:`is_direct_local_request`; callers that need "is
+    ``request.remote`` a meaningful client identity" want this.
+    """
+    return is_loopback(request.remote or "") and any(
+        h in request.headers for h in _PROXY_FORWARD_HEADERS
+    )
+
+
 def is_https_request(request: web.Request) -> bool:
     """Return ``True`` when the browser reached the dashboard over HTTPS.
 
